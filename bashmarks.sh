@@ -34,7 +34,7 @@
 
 # setup file to store bookmarks
 if [ ! -n "$SDIRS" ]; then
-    SDIRS=~/.sdirs
+    SDIRS=~/.sdirs2
 fi
 touch "$SDIRS"
 
@@ -46,20 +46,19 @@ function s {
     check_help $1
     _bookmark_name_valid "$@"
     if [ -z "$exit_message" ]; then
-        _purge_line "$SDIRS" "export DIR_$1="
+        _purge_line "$SDIRS" "$1"
         CURDIR=$(echo $PWD| sed "s#^$HOME#\$HOME#g")
-        echo "export DIR_$1=\"$CURDIR\"" >> $SDIRS
+        echo "$1=$CURDIR" >> "$SDIRS"
     fi
 }
 
 # jump to bookmark
 function g {
     check_help $1
-    source $SDIRS
-    target="$(eval $(echo echo $(echo \$DIR_$1)))"
+    target="$(_bookmark_get "$1")"
     if [ -d "$target" ]; then
         cd "$target"
-    elif [ ! -n "$target" ]; then
+    elif [ -z "$target" ]; then
         echo -e "\033[${RED}WARNING: '${1}' bashmark does not exist\033[00m"
     else
         echo -e "\033[${RED}WARNING: '${target}' does not exist\033[00m"
@@ -69,8 +68,7 @@ function g {
 # print bookmark
 function p {
     check_help $1
-    source $SDIRS
-    echo "$(eval $(echo echo $(echo \$DIR_$1)))"
+    _bookmark_get "$1"
 }
 
 # delete bookmark
@@ -78,8 +76,7 @@ function d {
     check_help $1
     _bookmark_name_valid "$@"
     if [ -z "$exit_message" ]; then
-        _purge_line "$SDIRS" "export DIR_$1="
-        unset "DIR_$1"
+        _purge_line "$SDIRS" "$1"
     fi
 }
 
@@ -96,21 +93,25 @@ function check_help {
     fi
 }
 
-# list bookmarks with dirnam
+# list bookmarks with dirname
 function l {
     check_help $1
-    source $SDIRS
-        
-    # if color output is not working for you, comment out the line below '\033[1;32m' == "red"
-    env | sort | awk '/^DIR_.+/{split(substr($0,5),parts,"="); printf("\033[0;33m%-20s\033[0m %s\n", parts[1], parts[2]);}'
-    
-    # uncomment this line if color output is not working with the line above
-    # env | grep "^DIR_" | cut -c5- | sort |grep "^.*=" 
+    sort "$SDIRS" | awk -F'=' '{printf("\033[0;33m%-20s\033[0m %s\n", $1, $2);}'
 }
+
 # list bookmarks without dirname
 function _l {
-    source $SDIRS
-    env | grep "^DIR_" | cut -c5- | sort | grep "^.*=" | cut -f1 -d "=" 
+    sort "$SDIRS" | cut -f1 -d "="
+}
+
+# look up a bookmark's directory
+function _bookmark_get {
+    local line
+    line=$(grep -m1 "^$1=" "$SDIRS" 2>/dev/null)
+    if [ -n "$line" ]; then
+        local dir="${line#*=}"
+        echo "${dir/#\$HOME/$HOME}"
+    fi
 }
 
 # validate bookmark name
@@ -119,7 +120,7 @@ function _bookmark_name_valid {
     if [ -z $1 ]; then
         exit_message="bookmark name required"
         echo $exit_message
-    elif [ "$1" != "$(echo $1 | sed 's/[^A-Za-z0-9_]//g')" ]; then
+    elif [ "$1" != "$(echo $1 | sed 's/[^A-Za-z0-9_-]//g')" ]; then
         exit_message="bookmark name is not valid"
         echo $exit_message
     fi
@@ -146,8 +147,8 @@ function _purge_line {
         t=$(mktemp -t bashmarks.XXXXXX) || exit 1
         trap "/bin/rm -f -- '$t'" EXIT
 
-        # purge line
-        sed "/$2/d" "$1" > "$t"
+        # purge line matching bookmark name
+        grep -v "^$2=" "$1" > "$t"
         /bin/mv "$t" "$1"
 
         # cleanup temp file
